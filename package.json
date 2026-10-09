@@ -1,0 +1,20 @@
+{
+  "name": "enterprise-cms",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "packages/*",
+    "backend",
+    "web"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev:backend": "npm run dev -w @cms/backend",
+    "dev:web": "npm run dev -w @cms/web",
+    "db:push": "npm run db:push -w @cms/backend",
+    "db:seed": "npm run db:seed -w @cms/backend",
+    "db:reset": "npm run db:reset -w @cms/backend"
+  }
+}

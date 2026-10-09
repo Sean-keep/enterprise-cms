@@ -1,0 +1,29 @@
+node_modules/
+.next/
+dist/
+build/
+coverage/
+
+# SQLite 数据库与 Prisma 生成物
+*.db
+*.db-journal
+backend/prisma/data/
+backend/prisma/cms.db
+backend/prisma/cms.db-journal
+
+# 上传的媒体文件
+web/uploads/
+uploads/
+
+# 环境变量 —— .env.example 是要提交的，.env 不是
+.env
+.env.local
+.env.*.local
+
+# 日志与系统
+*.log
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.tsbuildinfo

@@ -1,0 +1,254 @@
+// 企业官网 CMS —— SQLite 数据模型
+//
+// 两条取舍线，别越界：
+//   1. **要查询/筛选/分页的**（新闻、产品、留言、用户）用真实列 + 索引。
+//   2. **按模板变形状的页面内容**（pages.content）用 JSON 文本，形状由
+//      @cms/shared 的 zod 定义，加字段不用迁移。
+//
+// SQLite 的 Prisma 连接器不支持 enum / Json，所以状态字段是 String，
+// 取值范围由 packages/shared/src/constants.ts 约束。
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ── 用户与会话 ────────────────────────────────────────
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String
+  name         String
+  role         String    @default("editor") // admin | editor
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  sessions Session[]
+  media    Media[]
+  posts    Post[]
+  products Product[]
+  pages    Page[]
+}
+
+model Session {
+  id         String   @id @default(cuid())
+  // cookie 里放明文随机 token，库里只存 sha256 —— 库被拖走也伪造不了会话
+  tokenHash  String   @unique
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt  DateTime
+  ip         String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+  lastUsedAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+// ── 媒体 ──────────────────────────────────────────────
+
+model Media {
+  id        String   @id @default(cuid())
+  filename  String
+  // 存储键（如 2026/10/xxx.webp），不存完整 URL —— 换 S3 时数据不用改
+  path      String
+  mime      String
+  size      Int
+  width     Int?
+  height    Int?
+  alt       String?
+  createdAt DateTime @default(now())
+  createdBy String?
+  creator   User?    @relation(fields: [createdBy], references: [id], onDelete: SetNull)
+
+  // 谁把这张图当封面用。删除媒体时这些字段会被置空（SetNull），内容本身不删
+  postCovers    Post[]
+  productCovers Product[]
+
+  @@index([createdAt])
+}
+
+// ── 页面（模板分派）──────────────────────────────────
+
+model Page {
+  id          String    @id @default(cuid())
+  slug        String    @unique
+  // home | about | contact | generic —— 决定 content 的形状
+  template    String
+  title       String
+  summary     String?
+  // JSON 文本，形状见 @cms/shared 的 contentSchemaFor(template)
+  content     String    @default("{}")
+  // JSON 文本，SEO 一套
+  meta        String    @default("{}")
+  status      String    @default("draft") // draft | published | archived
+  publishedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  createdBy   String?
+  creator     User?     @relation(fields: [createdBy], references: [id], onDelete: SetNull)
+
+  @@index([status, publishedAt])
+  @@index([template])
+}
+
+// ── 新闻 ──────────────────────────────────────────────
+
+model PostCategory {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  name        String
+  description String?
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  posts Post[]
+}
+
+model Post {
+  id           String        @id @default(cuid())
+  slug         String        @unique
+  title        String
+  summary      String?
+  // sanitize 后的 HTML
+  body         String        @default("")
+  coverMediaId String?
+  cover        Media?        @relation(fields: [coverMediaId], references: [id], onDelete: SetNull)
+  categoryId   String?
+  category     PostCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  status       String        @default("draft")
+  isFeatured   Boolean       @default(false)
+  viewCount    Int           @default(0)
+  meta         String        @default("{}")
+  publishedAt  DateTime?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  createdBy    String?
+  creator      User?         @relation(fields: [createdBy], references: [id], onDelete: SetNull)
+
+  @@index([status, publishedAt])
+  @@index([categoryId, status, publishedAt])
+  @@index([isFeatured])
+}
+
+// ── 产品 / 服务 / 案例 ───────────────────────────────
+
+model ProductCategory {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  name        String
+  description String?
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  products Product[]
+}
+
+model Product {
+  id           String           @id @default(cuid())
+  slug         String           @unique
+  kind         String           @default("product") // product | service | case
+  title        String
+  subtitle     String?
+  summary      String?
+  body         String           @default("")
+  coverMediaId String?
+  cover        Media?           @relation(fields: [coverMediaId], references: [id], onDelete: SetNull)
+  categoryId   String?
+  category     ProductCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  isFeatured   Boolean          @default(false)
+  sortOrder    Int              @default(0)
+  // JSON 文本 string[] —— 卖点，列表页要展示所以不埋进正文
+  highlights   String           @default("[]")
+  // 仅 kind=case 使用
+  clientName   String?
+  industry     String?
+  status       String           @default("draft")
+  meta         String           @default("{}")
+  publishedAt  DateTime?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  createdBy    String?
+  creator      User?            @relation(fields: [createdBy], references: [id], onDelete: SetNull)
+
+  @@index([status, publishedAt])
+  @@index([kind, status, sortOrder])
+  @@index([categoryId])
+}
+
+// ── 菜单 ──────────────────────────────────────────────
+
+model Menu {
+  id    String     @id @default(cuid())
+  key   String     @unique // main | footer
+  name  String
+  items MenuItem[]
+}
+
+model MenuItem {
+  id         String     @id @default(cuid())
+  menuId     String
+  menu       Menu       @relation(fields: [menuId], references: [id], onDelete: Cascade)
+  parentId   String?
+  parent     MenuItem?  @relation("MenuItemTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children   MenuItem[] @relation("MenuItemTree")
+  label      String
+  linkType   String     @default("url") // page | post | product | category | url
+  pageId     String?
+  postId     String?
+  productId  String?
+  categorySlug String?
+  url        String?
+  sortOrder  Int        @default(0)
+  openInNew  Boolean    @default(false)
+
+  @@index([menuId, parentId, sortOrder])
+}
+
+// ── 表单收集 ──────────────────────────────────────────
+
+model FormSubmission {
+  id        String   @id @default(cuid())
+  formKey   String   @default("contact")
+  name      String
+  email     String?
+  phone     String?
+  company   String?
+  subject   String?
+  message   String
+  status    String   @default("new") // new | read | replied | spam
+  note      String?
+  sourceUrl String?
+  ip        String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([status, createdAt])
+  @@index([formKey])
+}
+
+// ── 站点配置（单行）──────────────────────────────────
+
+model SiteSetting {
+  id              String   @id @default("singleton")
+  siteName        String   @default("")
+  tagline         String   @default("")
+  logoMediaId     String?
+  faviconMediaId  String?
+  defaultOgMediaId String?
+  contactEmail    String?
+  contactPhone    String?
+  contactAddress  String?
+  icpBeian        String?
+  footerText      String?
+  updatedAt       DateTime @updatedAt
+}
